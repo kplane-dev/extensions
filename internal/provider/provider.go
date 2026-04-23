@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	crdfs "github.com/kplane-dev/extensions/config/crd"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 var _ multicluster.Provider = &ProjectVCPProvider{}
@@ -254,6 +258,11 @@ func (p *ProjectVCPProvider) createAndEngageCluster(
 		}
 	}()
 
+	if err := installCRDs(ctx, p.log, cfg); err != nil {
+		cancel()
+		return fmt.Errorf("failed to install CRDs on VCP %q: %w", name, err)
+	}
+
 	if err := p.mgr.Engage(clusterCtx, name, cl); err != nil {
 		cancel()
 		return fmt.Errorf("failed to engage manager: %w", err)
@@ -271,6 +280,50 @@ func (p *ProjectVCPProvider) createAndEngageCluster(
 		Hash:    hash,
 	})
 	p.log.Info("engaged project VCP", "cluster", name)
+	return nil
+}
+
+var crdGVR = schema.GroupVersionResource{
+	Group:    "apiextensions.k8s.io",
+	Version:  "v1",
+	Resource: "customresourcedefinitions",
+}
+
+func installCRDs(ctx context.Context, log logr.Logger, cfg *rest.Config) error {
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	entries, err := crdfs.FS.ReadDir(".")
+	if err != nil {
+		return fmt.Errorf("failed to read CRD FS: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := crdfs.FS.ReadFile(entry.Name())
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", entry.Name(), err)
+		}
+		jsonData, err := sigsyaml.YAMLToJSON(data)
+		if err != nil {
+			return fmt.Errorf("failed to convert %s: %w", entry.Name(), err)
+		}
+		obj := &unstructured.Unstructured{}
+		if err := obj.UnmarshalJSON(jsonData); err != nil {
+			return fmt.Errorf("failed to unmarshal %s: %w", entry.Name(), err)
+		}
+		if _, err := dynClient.Resource(crdGVR).Apply(ctx, obj.GetName(), obj, metav1.ApplyOptions{
+			FieldManager: "extensions-operator",
+			Force:        true,
+		}); err != nil {
+			return fmt.Errorf("failed to apply CRD %s: %w", obj.GetName(), err)
+		}
+		log.Info("installed CRD on VCP", "crd", obj.GetName())
+	}
 	return nil
 }
 
