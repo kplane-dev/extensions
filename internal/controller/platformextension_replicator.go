@@ -50,7 +50,7 @@ func (r *PlatformExtensionReplicator) Reconcile(ctx context.Context, req ctrl.Re
 			log.Error(err, "VCP not yet engaged", "gkeNamespace", ns)
 			continue
 		}
-		if err := r.upsert(ctx, cl.GetClient(), &pe); err != nil {
+		if err := upsertPlatformExtension(ctx, cl.GetClient(), &pe); err != nil {
 			log.Error(err, "failed to replicate", "gkeNamespace", ns)
 		}
 	}
@@ -82,7 +82,7 @@ func (r *PlatformExtensionReplicator) deleteFromAllVCPs(ctx context.Context, nam
 	return nil
 }
 
-func (r *PlatformExtensionReplicator) upsert(ctx context.Context, vcpClient client.Client, pe *extensionsv1alpha1.PlatformExtension) error {
+func upsertPlatformExtension(ctx context.Context, vcpClient client.Client, pe *extensionsv1alpha1.PlatformExtension) error {
 	desired := &extensionsv1alpha1.PlatformExtension{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        pe.Name,

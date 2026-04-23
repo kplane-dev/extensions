@@ -69,10 +69,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.PlatformExtensionReplicator{
+	replicator := &controller.PlatformExtensionReplicator{
 		MCRManager: mgr,
-	}).SetupWithManager(mgr.GetLocalManager()); err != nil {
+	}
+	if err := replicator.SetupWithManager(mgr.GetLocalManager()); err != nil {
 		log.Error(err, "unable to setup PlatformExtensionReplicator")
+		os.Exit(1)
+	}
+
+	// Watch PlatformExtension on all VCPs. If a project deletes one, re-enqueue
+	// the GKE-side object so the replicator restores it.
+	if err := mcbuilder.ControllerManagedBy(mgr).
+		For(&extensionsv1alpha1.PlatformExtension{}).
+		Named("platformextension-vcp-watcher").
+		Complete(mcreconcile.Func(func(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+			return replicator.Reconcile(ctx, ctrl.Request{NamespacedName: req.NamespacedName})
+		})); err != nil {
+		log.Error(err, "unable to setup PlatformExtension VCP watcher")
 		os.Exit(1)
 	}
 
@@ -93,6 +106,13 @@ func main() {
 	// Separate local controller: watches GKE ControlPlane resources and touches
 	// matching EnabledExtension objects when a new nested CP appears, triggering
 	// the MCR reconciler above via the annotation change.
+	if err := (&controller.PlatformExtensionBootstrapper{
+		MCRManager: mgr,
+	}).SetupWithManager(mgr.GetLocalManager()); err != nil {
+		log.Error(err, "unable to setup PlatformExtensionBootstrapper")
+		os.Exit(1)
+	}
+
 	if err := (&controller.NewNestedCPController{
 		LocalClient: mgr.GetLocalManager().GetClient(),
 		MCRManager:  mgr,
