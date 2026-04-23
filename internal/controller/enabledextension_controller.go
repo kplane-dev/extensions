@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 
 	extensionsv1alpha1 "github.com/kplane-dev/extensions/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -239,9 +238,9 @@ func fetchURL(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// applyCRD creates or updates the CRD on the target apiserver. Returns the
-// applied object, whether it was newly created, and whether the spec actually
-// changed (false when the update would be a no-op).
+// applyCRD server-side applies the CRD on the target apiserver. Returns the
+// applied object, whether it was newly created, and whether the apply actually
+// mutated server state (determined by resourceVersion bump).
 func applyCRD(ctx context.Context, c client.Client, manifest []byte) (*unstructured.Unstructured, bool, bool, error) {
 	obj := &unstructured.Unstructured{}
 	jsonBytes, err := yaml.YAMLToJSON(manifest)
@@ -254,23 +253,22 @@ func applyCRD(ctx context.Context, c client.Client, manifest []byte) (*unstructu
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(obj.GroupVersionKind())
 	err = c.Get(ctx, types.NamespacedName{Name: obj.GetName()}, existing)
-	if apierrors.IsNotFound(err) {
-		if err := c.Create(ctx, obj); err != nil {
-			return nil, false, false, err
-		}
-		return obj, true, true, nil
-	}
-	if err != nil {
+	created := apierrors.IsNotFound(err)
+	if err != nil && !created {
 		return nil, false, false, err
 	}
-	if reflect.DeepEqual(obj.Object["spec"], existing.Object["spec"]) {
-		return existing, false, false, nil
+	prevRV := ""
+	if !created {
+		prevRV = existing.GetResourceVersion()
 	}
-	obj.SetResourceVersion(existing.GetResourceVersion())
-	if err := c.Update(ctx, obj); err != nil {
+	// Server-side apply: clear RV so the apiserver treats this as a declared
+	// state submission, not an optimistic-concurrency update.
+	obj.SetResourceVersion("")
+	if err := c.Patch(ctx, obj, client.Apply, client.FieldOwner("kplane-extensions"), client.ForceOwnership); err != nil {
 		return nil, false, false, err
 	}
-	return obj, false, true, nil
+	changed := created || obj.GetResourceVersion() != prevRV
+	return obj, created, changed, nil
 }
 
 // setAccepted updates the Accepted condition.
