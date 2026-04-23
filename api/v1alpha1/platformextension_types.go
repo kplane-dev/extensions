@@ -19,6 +19,7 @@ type PlatformExtension struct {
 	Status PlatformExtensionStatus `json:"status,omitempty"`
 }
 
+// PlatformExtensionSpec defines the desired state of PlatformExtension.
 // +kubebuilder:object:generate=true
 type PlatformExtensionSpec struct {
 	// DisplayName is the human-readable name shown in the UI.
@@ -37,6 +38,7 @@ type PlatformExtensionSpec struct {
 	CRDs []string `json:"crds,omitempty"`
 }
 
+// PlatformExtensionStatus defines the observed state of PlatformExtension.
 // +kubebuilder:object:generate=true
 type PlatformExtensionStatus struct {
 	// Conditions reflect replication health.
@@ -44,6 +46,7 @@ type PlatformExtensionStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// PlatformExtensionList contains a list of PlatformExtension.
 // +kubebuilder:object:root=true
 type PlatformExtensionList struct {
 	metav1.TypeMeta `json:",inline"`

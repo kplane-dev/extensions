@@ -18,6 +18,7 @@ type Extension struct {
 	Status ExtensionStatus `json:"status,omitempty"`
 }
 
+// ExtensionSpec defines the desired state of Extension.
 // +kubebuilder:object:generate=true
 type ExtensionSpec struct {
 	// DisplayName is the human-readable name shown in the UI.
@@ -36,12 +37,14 @@ type ExtensionSpec struct {
 	CRDs []string `json:"crds,omitempty"`
 }
 
+// ExtensionStatus defines the observed state of Extension.
 // +kubebuilder:object:generate=true
 type ExtensionStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// ExtensionList contains a list of Extension.
 // +kubebuilder:object:root=true
 type ExtensionList struct {
 	metav1.TypeMeta `json:",inline"`

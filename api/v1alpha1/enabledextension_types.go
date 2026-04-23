@@ -18,6 +18,7 @@ type EnabledExtension struct {
 	Status EnabledExtensionStatus `json:"status,omitempty"`
 }
 
+// EnabledExtensionSpec defines the desired state of EnabledExtension.
 // +kubebuilder:object:generate=true
 type EnabledExtensionSpec struct {
 	// ExtensionRef references the Extension or PlatformExtension to enable.
@@ -38,6 +39,7 @@ type ExtensionRef struct {
 	Name string `json:"name"`
 }
 
+// EnabledExtensionStatus defines the observed state of EnabledExtension.
 // +kubebuilder:object:generate=true
 // +kubebuilder:printcolumn:name="Accepted",type=string,JSONPath=`.status.conditions[?(@.type=="Accepted")].status`
 // +kubebuilder:printcolumn:name="Programmed",type=string,JSONPath=`.status.conditions[?(@.type=="Programmed")].status`
@@ -56,6 +58,7 @@ const (
 	ConditionProgrammed = "Programmed"
 )
 
+// EnabledExtensionList contains a list of EnabledExtension.
 // +kubebuilder:object:root=true
 type EnabledExtensionList struct {
 	metav1.TypeMeta `json:",inline"`
