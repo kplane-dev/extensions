@@ -9,10 +9,12 @@ import (
 	"net/http"
 
 	extensionsv1alpha1 "github.com/kplane-dev/extensions/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
@@ -30,6 +32,9 @@ type EnabledExtensionReconciler struct {
 	Manager mcmanager.Manager
 	// LocalClient is the GKE management cluster client, used for nested CP lookups.
 	LocalClient client.Client
+	// Recorders emits events on each target nested CP; created via
+	// NewRecorderCache once per process.
+	Recorders *RecorderCache
 }
 
 // +kubebuilder:rbac:groups=extensions.kplane.dev,resources=enabledextensions,verbs=get;list;watch;update;patch
@@ -81,7 +86,7 @@ func (r *EnabledExtensionReconciler) Reconcile(ctx context.Context, req mcreconc
 	}
 
 	for cpName, kubeconfigData := range targetCPs {
-		if err := r.installCRDs(ctx, kubeconfigData, crds); err != nil {
+		if err := r.installCRDs(ctx, kubeconfigData, crds, &ee); err != nil {
 			log.Error(err, "failed to install CRDs", "controlPlane", cpName)
 			return ctrl.Result{}, r.setProgrammed(ctx, vcpClient, &ee, metav1.ConditionFalse, "InstallError",
 				fmt.Sprintf("control plane %s: %v", cpName, err))
@@ -164,7 +169,9 @@ func (r *EnabledExtensionReconciler) resolveTargetCPs(
 	return result, nil
 }
 
-func (r *EnabledExtensionReconciler) installCRDs(ctx context.Context, kubeconfigData []byte, crdURLs []string) error {
+func (r *EnabledExtensionReconciler) installCRDs(
+	ctx context.Context, kubeconfigData []byte, crdURLs []string, ee *extensionsv1alpha1.EnabledExtension,
+) error {
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 	if err != nil {
 		return fmt.Errorf("parse kubeconfig: %w", err)
@@ -173,13 +180,33 @@ func (r *EnabledExtensionReconciler) installCRDs(ctx context.Context, kubeconfig
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
 	}
+	var recorder interface {
+		Event(object runtime.Object, eventtype, reason, message string)
+	}
+	if r.Recorders != nil {
+		rec, err := r.Recorders.RecorderFor(restCfg)
+		if err != nil {
+			return fmt.Errorf("event recorder: %w", err)
+		}
+		recorder = rec
+	}
 	for _, url := range crdURLs {
 		manifest, err := fetchURL(ctx, url)
 		if err != nil {
 			return fmt.Errorf("fetch CRD %s: %w", url, err)
 		}
-		if err := applyCRD(ctx, cpClient, manifest); err != nil {
+		obj, created, err := applyCRD(ctx, cpClient, manifest)
+		if err != nil {
 			return fmt.Errorf("apply CRD %s: %w", url, err)
+		}
+		if recorder != nil {
+			reason := "Updated"
+			msg := fmt.Sprintf("CRD %s updated by EnabledExtension %s/%s", obj.GetName(), ee.Namespace, ee.Name)
+			if created {
+				reason = "Installed"
+				msg = fmt.Sprintf("CRD %s installed by EnabledExtension %s/%s", obj.GetName(), ee.Namespace, ee.Name)
+			}
+			recorder.Event(obj, corev1.EventTypeNormal, reason, msg)
 		}
 	}
 	return nil
@@ -201,26 +228,34 @@ func fetchURL(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func applyCRD(ctx context.Context, c client.Client, manifest []byte) error {
+// applyCRD creates or updates the CRD on the target apiserver. Returns the
+// applied object and whether it was newly created (true) or updated (false).
+func applyCRD(ctx context.Context, c client.Client, manifest []byte) (*unstructured.Unstructured, bool, error) {
 	obj := &unstructured.Unstructured{}
 	jsonBytes, err := yaml.YAMLToJSON(manifest)
 	if err != nil {
-		return fmt.Errorf("yaml to json: %w", err)
+		return nil, false, fmt.Errorf("yaml to json: %w", err)
 	}
 	if err := obj.UnmarshalJSON(jsonBytes); err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
+		return nil, false, fmt.Errorf("unmarshal: %w", err)
 	}
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(obj.GroupVersionKind())
 	err = c.Get(ctx, types.NamespacedName{Name: obj.GetName()}, existing)
 	if apierrors.IsNotFound(err) {
-		return c.Create(ctx, obj)
+		if err := c.Create(ctx, obj); err != nil {
+			return nil, false, err
+		}
+		return obj, true, nil
 	}
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	obj.SetResourceVersion(existing.GetResourceVersion())
-	return c.Update(ctx, obj)
+	if err := c.Update(ctx, obj); err != nil {
+		return nil, false, err
+	}
+	return obj, false, nil
 }
 
 // setAccepted updates the Accepted condition.

@@ -89,9 +89,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	recorders := controller.NewRecorderCache(scheme, "kplane-extensions")
+	defer recorders.Shutdown()
+
 	reconciler := &controller.EnabledExtensionReconciler{
 		Manager:     mgr,
 		LocalClient: mgr.GetLocalManager().GetClient(),
+		Recorders:   recorders,
 	}
 
 	if err := mcbuilder.ControllerManagedBy(mgr).
