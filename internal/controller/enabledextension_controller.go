@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -154,7 +155,11 @@ func (r *EnabledExtensionReconciler) resolveTargetCPs(
 		if kubeconfig == "" {
 			return nil, fmt.Errorf("kubeconfig missing from secret for %s", vcpName)
 		}
-		result[vcpName] = []byte(kubeconfig)
+		decoded, err := base64.StdEncoding.DecodeString(kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("decode kubeconfig for %s: %w", vcpName, err)
+		}
+		result[vcpName] = decoded
 	}
 	return result, nil
 }
