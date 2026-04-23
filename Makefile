@@ -41,4 +41,4 @@ uninstall: ## Remove CRDs from the current cluster.
 
 .PHONY: catalog
 catalog: ## Apply all catalog PlatformExtension manifests to the current cluster.
-	kubectl apply -f catalog/
+	kubectl apply -f config/catalog/

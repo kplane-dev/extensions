@@ -8,13 +8,13 @@ This repo ships three CRDs and a controller:
 
 | Resource | Scope | Who creates it | Purpose |
 |---|---|---|---|
-| `PlatformExtension` | Cluster | kplane (via catalog/) | Describes a managed extension available to all projects |
+| `PlatformExtension` | Cluster | kplane (via config/catalog/) | Describes a managed extension available to all projects |
 | `Extension` | Namespaced | Users | User-defined extension for a single project |
 | `EnabledExtension` | Namespaced | Users | Activates an extension for one or more nested control planes |
 
 ### How it works
 
-1. `PlatformExtension` objects are defined in `catalog/` and applied to the kplane management cluster. The operator replicates them read-only into every project VCP.
+1. `PlatformExtension` objects are defined in `config/catalog/` and applied to the kplane management cluster. The operator replicates them read-only into every project VCP.
 2. Users create an `EnabledExtension` in their project VCP referencing a `PlatformExtension` or their own `Extension`.
 3. The operator installs the extension's CRDs into the target nested control planes.
 
@@ -33,10 +33,10 @@ GKE (management cluster)
 
 ## Registering a PlatformExtension
 
-To add a new managed extension, open a PR adding a directory under `catalog/`:
+To add a new managed extension, open a PR adding a directory under `config/catalog/`:
 
 ```
-catalog/
+config/catalog/
   your-service/
     platformextension.yaml
 ```
@@ -144,6 +144,6 @@ make catalog
 
 | Name | Description | Tags |
 |---|---|---|
-| [exe-dev](catalog/exe-dev/) | Persistent Linux VMs | VMs, Sandboxes, Linux |
-| [cloudflare](catalog/cloudflare/) | DNS, Workers, Tunnels, R2 | DNS, Workers, CDN |
-| [vercel](catalog/vercel/) | Deployments and preview environments | Deployments, Previews |
+| [exe-dev](config/catalog/exe-dev/) | Persistent Linux VMs | VMs, Sandboxes, Linux |
+| [cloudflare](config/catalog/cloudflare/) | DNS, Workers, Tunnels, R2 | DNS, Workers, CDN |
+| [vercel](config/catalog/vercel/) | Deployments and preview environments | Deployments, Previews |
