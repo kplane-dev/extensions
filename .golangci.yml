@@ -8,7 +8,6 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-
-linters-settings:
-  staticcheck:
-    checks: ["all"]
+  settings:
+    staticcheck:
+      checks: ["all"]
