@@ -105,6 +105,10 @@ func main() {
 		log.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
+	if err := mgr.GetLocalManager().AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		log.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
 
 	log.Info("starting extensions operator")
 	if err := mgr.Start(ctx); err != nil {
