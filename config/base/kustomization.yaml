@@ -7,3 +7,6 @@ resources:
   - ../rbac/role_binding.yaml
   - ../rbac/leader_election_role.yaml
   - ../rbac/leader_election_role_binding.yaml
+  - ../crd/extensions.kplane.dev_enabledextensions.yaml
+  - ../crd/extensions.kplane.dev_extensions.yaml
+  - ../crd/extensions.kplane.dev_platformextensions.yaml
