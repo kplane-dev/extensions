@@ -39,6 +39,7 @@ spec:
           metadata:
             type: object
           spec:
+            description: EnabledExtensionSpec defines the desired state of EnabledExtension.
             properties:
               controlPlanes:
                 description: |-
@@ -70,6 +71,7 @@ spec:
             - extensionRef
             type: object
           status:
+            description: EnabledExtensionStatus defines the observed state of EnabledExtension.
             properties:
               conditions:
                 description: |-

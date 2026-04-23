@@ -39,6 +39,7 @@ spec:
           metadata:
             type: object
           spec:
+            description: ExtensionSpec defines the desired state of Extension.
             properties:
               crds:
                 description: |-
@@ -63,6 +64,7 @@ spec:
             - displayName
             type: object
           status:
+            description: ExtensionStatus defines the observed state of Extension.
             properties:
               conditions:
                 items:
