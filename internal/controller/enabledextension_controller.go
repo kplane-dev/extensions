@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 
 	extensionsv1alpha1 "github.com/kplane-dev/extensions/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -61,7 +62,7 @@ func (r *EnabledExtensionReconciler) Reconcile(ctx context.Context, req mcreconc
 	}
 
 	// Resolve CRDs — sets Accepted condition.
-	crds, err := r.resolveCRDs(ctx, vcpClient, &ee)
+	resolved, err := r.resolveCRDs(ctx, vcpClient, &ee)
 	if err != nil {
 		return ctrl.Result{}, r.setAccepted(ctx, vcpClient, &ee, metav1.ConditionFalse, "RefNotFound", err.Error())
 	}
@@ -69,7 +70,7 @@ func (r *EnabledExtensionReconciler) Reconcile(ctx context.Context, req mcreconc
 		return ctrl.Result{}, err
 	}
 
-	if len(crds) == 0 {
+	if len(resolved.crdURLs) == 0 {
 		return ctrl.Result{}, r.setProgrammed(ctx, vcpClient, &ee, metav1.ConditionTrue, "NoCRDs", "no CRDs to install")
 	}
 
@@ -86,21 +87,26 @@ func (r *EnabledExtensionReconciler) Reconcile(ctx context.Context, req mcreconc
 	}
 
 	for cpName, kubeconfigData := range targetCPs {
-		if err := r.installCRDs(ctx, kubeconfigData, crds, &ee); err != nil {
+		if err := r.installCRDs(ctx, kubeconfigData, resolved, &ee); err != nil {
 			log.Error(err, "failed to install CRDs", "controlPlane", cpName)
 			return ctrl.Result{}, r.setProgrammed(ctx, vcpClient, &ee, metav1.ConditionFalse, "InstallError",
 				fmt.Sprintf("control plane %s: %v", cpName, err))
 		}
-		log.Info("installed CRDs", "controlPlane", cpName, "count", len(crds))
+		log.Info("installed CRDs", "controlPlane", cpName, "count", len(resolved.crdURLs))
 	}
 
 	return ctrl.Result{}, r.setProgrammed(ctx, vcpClient, &ee, metav1.ConditionTrue, "Programmed",
 		fmt.Sprintf("CRDs installed in %d control plane(s)", len(targetCPs)))
 }
 
+type resolvedExtension struct {
+	crdURLs     []string
+	displayName string
+}
+
 func (r *EnabledExtensionReconciler) resolveCRDs(
 	ctx context.Context, vcpClient client.Client, ee *extensionsv1alpha1.EnabledExtension,
-) ([]string, error) {
+) (*resolvedExtension, error) {
 	ref := ee.Spec.ExtensionRef
 	switch ref.Kind {
 	case "PlatformExtension":
@@ -108,13 +114,13 @@ func (r *EnabledExtensionReconciler) resolveCRDs(
 		if err := vcpClient.Get(ctx, types.NamespacedName{Name: ref.Name}, &pe); err != nil {
 			return nil, fmt.Errorf("get PlatformExtension %q: %w", ref.Name, err)
 		}
-		return pe.Spec.CRDs, nil
+		return &resolvedExtension{crdURLs: pe.Spec.CRDs, displayName: pe.Spec.DisplayName}, nil
 	case "Extension":
 		var ext extensionsv1alpha1.Extension
 		if err := vcpClient.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: ee.Namespace}, &ext); err != nil {
 			return nil, fmt.Errorf("get Extension %q: %w", ref.Name, err)
 		}
-		return ext.Spec.CRDs, nil
+		return &resolvedExtension{crdURLs: ext.Spec.CRDs, displayName: ext.Spec.DisplayName}, nil
 	default:
 		return nil, fmt.Errorf("unknown ExtensionRef kind %q", ref.Kind)
 	}
@@ -170,7 +176,7 @@ func (r *EnabledExtensionReconciler) resolveTargetCPs(
 }
 
 func (r *EnabledExtensionReconciler) installCRDs(
-	ctx context.Context, kubeconfigData []byte, crdURLs []string, ee *extensionsv1alpha1.EnabledExtension,
+	ctx context.Context, kubeconfigData []byte, resolved *resolvedExtension, ee *extensionsv1alpha1.EnabledExtension,
 ) error {
 	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigData)
 	if err != nil {
@@ -190,24 +196,29 @@ func (r *EnabledExtensionReconciler) installCRDs(
 		}
 		recorder = rec
 	}
-	for _, url := range crdURLs {
+	label := resolved.displayName
+	if label == "" {
+		label = ee.Spec.ExtensionRef.Name
+	}
+	for _, url := range resolved.crdURLs {
 		manifest, err := fetchURL(ctx, url)
 		if err != nil {
 			return fmt.Errorf("fetch CRD %s: %w", url, err)
 		}
-		obj, created, err := applyCRD(ctx, cpClient, manifest)
+		obj, created, changed, err := applyCRD(ctx, cpClient, manifest)
 		if err != nil {
 			return fmt.Errorf("apply CRD %s: %w", url, err)
 		}
-		if recorder != nil {
-			reason := "Updated"
-			msg := fmt.Sprintf("CRD %s updated by EnabledExtension %s/%s", obj.GetName(), ee.Namespace, ee.Name)
-			if created {
-				reason = "Installed"
-				msg = fmt.Sprintf("CRD %s installed by EnabledExtension %s/%s", obj.GetName(), ee.Namespace, ee.Name)
-			}
-			recorder.Event(obj, corev1.EventTypeNormal, reason, msg)
+		if recorder == nil || (!created && !changed) {
+			continue
 		}
+		reason := "ExtensionUpgraded"
+		msg := fmt.Sprintf("%q upgraded (CRD %s)", label, obj.GetName())
+		if created {
+			reason = "ExtensionInstalled"
+			msg = fmt.Sprintf("%q installed (CRD %s)", label, obj.GetName())
+		}
+		recorder.Event(obj, corev1.EventTypeNormal, reason, msg)
 	}
 	return nil
 }
@@ -229,33 +240,37 @@ func fetchURL(ctx context.Context, url string) ([]byte, error) {
 }
 
 // applyCRD creates or updates the CRD on the target apiserver. Returns the
-// applied object and whether it was newly created (true) or updated (false).
-func applyCRD(ctx context.Context, c client.Client, manifest []byte) (*unstructured.Unstructured, bool, error) {
+// applied object, whether it was newly created, and whether the spec actually
+// changed (false when the update would be a no-op).
+func applyCRD(ctx context.Context, c client.Client, manifest []byte) (*unstructured.Unstructured, bool, bool, error) {
 	obj := &unstructured.Unstructured{}
 	jsonBytes, err := yaml.YAMLToJSON(manifest)
 	if err != nil {
-		return nil, false, fmt.Errorf("yaml to json: %w", err)
+		return nil, false, false, fmt.Errorf("yaml to json: %w", err)
 	}
 	if err := obj.UnmarshalJSON(jsonBytes); err != nil {
-		return nil, false, fmt.Errorf("unmarshal: %w", err)
+		return nil, false, false, fmt.Errorf("unmarshal: %w", err)
 	}
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(obj.GroupVersionKind())
 	err = c.Get(ctx, types.NamespacedName{Name: obj.GetName()}, existing)
 	if apierrors.IsNotFound(err) {
 		if err := c.Create(ctx, obj); err != nil {
-			return nil, false, err
+			return nil, false, false, err
 		}
-		return obj, true, nil
+		return obj, true, true, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
+	}
+	if reflect.DeepEqual(obj.Object["spec"], existing.Object["spec"]) {
+		return existing, false, false, nil
 	}
 	obj.SetResourceVersion(existing.GetResourceVersion())
 	if err := c.Update(ctx, obj); err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
-	return obj, false, nil
+	return obj, false, true, nil
 }
 
 // setAccepted updates the Accepted condition.
