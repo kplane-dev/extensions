@@ -1,0 +1,14 @@
+apiVersion: extensions.kplane.dev/v1alpha1
+kind: PlatformExtension
+metadata:
+  name: vercel
+spec:
+  displayName: Vercel
+  description: >
+    Trigger deployments, manage preview environments, and configure domains
+    from your control plane.
+  tags:
+    - Deployments
+    - Previews
+    - Domains
+  crds: []

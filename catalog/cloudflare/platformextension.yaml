@@ -1,0 +1,15 @@
+apiVersion: extensions.kplane.dev/v1alpha1
+kind: PlatformExtension
+metadata:
+  name: cloudflare
+spec:
+  displayName: Cloudflare
+  description: >
+    Manage DNS records, Workers, Tunnels, and R2 storage as Kubernetes
+    resources inside your control plane.
+  tags:
+    - DNS
+    - Workers
+    - CDN
+    - Tunnels
+  crds: []

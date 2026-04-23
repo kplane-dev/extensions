@@ -1,0 +1,15 @@
+apiVersion: extensions.kplane.dev/v1alpha1
+kind: PlatformExtension
+metadata:
+  name: exe-dev
+spec:
+  displayName: exe.dev
+  description: >
+    Provision and manage persistent Linux VMs directly from your control plane.
+    Perfect for sandboxes, CI runners, and agent workloads.
+  tags:
+    - VMs
+    - Sandboxes
+    - Linux
+  crds:
+    - https://raw.githubusercontent.com/kplane-dev/kplane-exe-dev/main/config/crd/bases/exe.kplane.dev_exevms.yaml

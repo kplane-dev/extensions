@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install controller-gen
+        run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+
+      - name: Check codegen is up to date
+        run: |
+          make generate manifests
+          git diff --exit-code || (echo "Generated files are out of date. Run 'make generate manifests' and commit the result." && exit 1)
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: make test
