@@ -10,3 +10,4 @@ resources:
   - ../crd/extensions.kplane.dev_enabledextensions.yaml
   - ../crd/extensions.kplane.dev_extensions.yaml
   - ../crd/extensions.kplane.dev_platformextensions.yaml
+  - ../../catalog
